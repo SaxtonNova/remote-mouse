@@ -6,6 +6,7 @@ import subprocess
 
 from flask import Flask, send_from_directory
 from flask_socketio import SocketIO
+from engineio.async_drivers import threading as ei_threading
 import pyautogui
 
 from PyQt5.QtWidgets import (
