@@ -8,7 +8,7 @@ from flask import Flask, send_from_directory
 from flask_socketio import SocketIO
 from engineio.async_drivers import threading as ei_threading
 import pyautogui
-
+import pyperclip
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLayout,
     QSlider, QComboBox, QPushButton
@@ -92,7 +92,8 @@ def handle_type(char):
     elif char == 'ENTER':
         pyautogui.press('enter')
     else:
-        pyautogui.write(char)
+        pyperclip.copy(char)
+        pyautogui.hotkey("ctrl", "v")
 
 
 
