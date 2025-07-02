@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Remote Mouse</title>
+  <style>
+    body {
+      margin: 0;
+      background: black;
+      height: 100vh;
+      width: 100vw;
+      touch-action: none; /* disable scrolling */
+      overflow: hidden;
+      color: white;
+      position: relative;
+    }
+
+    #keyboardInput {
+      position: fixed;
+      bottom: 20px;
+      left: 10px;
+      width: 90%;
+      font-size: 18px;
+      color: white;
+      background: #222;
+      border: none;
+      padding: 8px;
+      border-radius: 6px;
+      caret-color: #0af;
+      z-index: 10000;
+      outline: none;
+      box-sizing: border-box;
+    }
+  </style>
+</head>
+<body>
+
+  <input
+    id="keyboardInput"
+    type="text"
+    autocomplete="off"
+    autocorrect="off"
+    autocapitalize="off"
+    spellcheck="false"
+    placeholder="Tap here to type..."
+  />
+
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script src="client.js"></script>
+
+</body>
+</html>
