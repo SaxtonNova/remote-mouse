@@ -1,4 +1,5 @@
 import sys
+import os
 import socket
 import qrcode
 import threading
@@ -9,6 +10,17 @@ from flask_socketio import SocketIO
 from engineio.async_drivers import threading as ei_threading
 import pyautogui
 import pyperclip
+
+# Disable pyautogui failsafe (prevents error when mouse hits screen corners)
+pyautogui.FAILSAFE = False
+
+
+def get_app_data_path():
+    """Get the appropriate AppData folder for storing application files."""
+    app_data = os.environ.get('LOCALAPPDATA', os.path.expanduser('~'))
+    app_folder = os.path.join(app_data, 'RemoteTouchpad')
+    os.makedirs(app_folder, exist_ok=True)
+    return app_folder
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLayout,
     QSlider, QComboBox, QPushButton
@@ -114,9 +126,12 @@ class RemoteMouseUI(QWidget):
         ip = get_local_ip()
         self.remote_url = f"http://{ip}:5050"
         qr = qrcode.make(self.remote_url)
-        qr.save("qr.png")
 
-        qr_image = QImage("qr.png")
+        # Save QR code to AppData folder
+        qr_path = os.path.join(get_app_data_path(), "qr.png")
+        qr.save(qr_path)
+
+        qr_image = QImage(qr_path)
         qr_pixmap = QPixmap.fromImage(qr_image)
 
         qr_label = QLabel("Scan this QR on your phone:")
