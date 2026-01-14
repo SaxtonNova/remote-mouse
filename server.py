@@ -1,15 +1,50 @@
 import sys
 import os
+
+# === Handle windowless mode for PyInstaller ===
+# Redirect stdout/stderr to a file for debugging, or devnull in production
+def setup_output_streams():
+    if sys.stdout is None or sys.stderr is None:
+        app_data = os.environ.get('LOCALAPPDATA', os.path.expanduser('~'))
+        log_dir = os.path.join(app_data, 'RemoteTouchpad')
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, 'debug.log')
+
+        f = open(log_file, 'w', encoding='utf-8')
+        if sys.stdout is None:
+            sys.stdout = f
+        if sys.stderr is None:
+            sys.stderr = f
+
+setup_output_streams()
+
 import socket
 import qrcode
 import threading
 import subprocess
+import logging
+
+# Setup logging to file when running as exe
+if getattr(sys, 'frozen', False):
+    app_data = os.environ.get('LOCALAPPDATA', os.path.expanduser('~'))
+    log_dir = os.path.join(app_data, 'RemoteTouchpad')
+    logging.basicConfig(
+        filename=os.path.join(log_dir, 'app.log'),
+        level=logging.DEBUG,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
 
 from flask import Flask, send_from_directory
 from flask_socketio import SocketIO
-from engineio.async_drivers import threading as ei_threading
+from engineio.async_drivers import threading as async_threading  # Required for async_mode='threading'
 import pyautogui
 import pyperclip
+from PyQt5.QtWidgets import (
+    QApplication, QWidget, QLabel, QVBoxLayout,
+    QSlider, QComboBox, QPushButton
+)
+from PyQt5.QtGui import QPixmap
+from PyQt5.QtCore import Qt
 
 # Disable pyautogui failsafe (prevents error when mouse hits screen corners)
 pyautogui.FAILSAFE = False
@@ -21,16 +56,18 @@ def get_app_data_path():
     app_folder = os.path.join(app_data, 'RemoteTouchpad')
     os.makedirs(app_folder, exist_ok=True)
     return app_folder
-from PyQt5.QtWidgets import (
-    QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLayout,
-    QSlider, QComboBox, QPushButton
-)
-from PyQt5.QtGui import QPixmap, QImage
-from PyQt5.QtCore import Qt
 
 
-# === Helpers ===
+def get_base_path():
+    """Get the base path for resources (works for both dev and PyInstaller exe)."""
+    if getattr(sys, 'frozen', False):
+        return sys._MEIPASS
+    else:
+        return os.path.dirname(os.path.abspath(__file__))
+
+
 def get_local_ip():
+    """Get the local IP address."""
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(("8.8.8.8", 80))
@@ -49,27 +86,36 @@ resolution = (1920, 1080)
 
 
 # === Flask App ===
-app = Flask(__name__, static_folder="webapp")
-socketio = SocketIO(app, cors_allowed_origins='*', async_mode="threading")
+webapp_path = os.path.join(get_base_path(), 'webapp')
+app = Flask(__name__, static_folder=webapp_path)
+
+# Disable Flask logging
+app.logger.disabled = True
+log = logging.getLogger('werkzeug')
+log.disabled = True
+
+socketio = SocketIO(app, cors_allowed_origins='*', async_mode='threading', logger=False, engineio_logger=False)
+
 
 @app.route('/')
 def index():
-    return send_from_directory('webapp', 'index.html')
+    return send_from_directory(webapp_path, 'index.html')
+
 
 @app.route('/<path:path>')
 def serve_static(path):
-    return send_from_directory('webapp', path)
+    return send_from_directory(webapp_path, path)
+
 
 @socketio.on('connect')
 def handle_connect():
-    print("[CONNECT] Phone connected.")
+    pass
+
 
 @socketio.on('move')
 def handle_move(data):
-    dx = data.get('dx', 0)
-    dy = data.get('dy', 0)
-    dx *= mouse_sensitivity
-    dy *= mouse_sensitivity
+    dx = data.get('dx', 0) * mouse_sensitivity
+    dy = data.get('dy', 0) * mouse_sensitivity
     pyautogui.moveRel(dx, dy)
 
 @socketio.on('click')
@@ -86,9 +132,7 @@ def handle_mouseup():
 
 @socketio.on('scroll')
 def handle_scroll(data):
-    dx = data.get('dx', 0)
-    dy = data.get('dy', 0)
-    dy *= scroll_sensitivity
+    dy = data.get('dy', 0) * scroll_sensitivity
     pyautogui.scroll(int(dy * 60))
 
 @socketio.on('rightclick')
@@ -97,8 +141,6 @@ def handle_rightclick():
 
 @socketio.on('type')
 def handle_type(char):
-    import pyautogui
-    print(f"[TYPE] Key received: {char}")
     if char == 'BACKSPACE':
         pyautogui.press('backspace')
     elif char == 'ENTER':
@@ -115,7 +157,7 @@ class RemoteMouseUI(QWidget):
     def __init__(self):
         super().__init__()
 
-        self.setWindowTitle("Remote Mouse - Settings Panel")
+        self.setWindowTitle("Remote Touchpad")
         self.setGeometry(200, 200, 350, 600)
         self.setStyleSheet("background-color: #1e1e1e; color: white; font-size: 14px;")
 
@@ -125,14 +167,16 @@ class RemoteMouseUI(QWidget):
         # QR Code
         ip = get_local_ip()
         self.remote_url = f"http://{ip}:5050"
-        qr = qrcode.make(self.remote_url)
 
-        # Save QR code to AppData folder
+        # Generate QR code to bytes buffer (no file I/O issues)
+        qr = qrcode.QRCode(version=1, box_size=10, border=4)
+        qr.add_data(self.remote_url)
+        qr.make(fit=True)
+        qr_img = qr.make_image(fill_color="black", back_color="white")
+
+        # Save to AppData
         qr_path = os.path.join(get_app_data_path(), "qr.png")
-        qr.save(qr_path)
-
-        qr_image = QImage(qr_path)
-        qr_pixmap = QPixmap.fromImage(qr_image)
+        qr_img.save(qr_path)
 
         qr_label = QLabel("Scan this QR on your phone:")
         qr_label.setAlignment(Qt.AlignCenter)
@@ -140,9 +184,16 @@ class RemoteMouseUI(QWidget):
         layout.addWidget(qr_label)
 
         qr_display = QLabel()
+        qr_pixmap = QPixmap(qr_path)
         qr_display.setPixmap(qr_pixmap.scaled(200, 200, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         qr_display.setAlignment(Qt.AlignCenter)
         layout.addWidget(qr_display)
+
+        # URL label
+        url_label = QLabel(self.remote_url)
+        url_label.setAlignment(Qt.AlignCenter)
+        url_label.setStyleSheet("font-size: 12px; color: #888;")
+        layout.addWidget(url_label)
 
         # Mouse Sensitivity
         layout.addWidget(QLabel("Mouse Sensitivity"))
@@ -172,7 +223,7 @@ class RemoteMouseUI(QWidget):
         layout.addWidget(self.resolution_combo)
 
         # Size Options button
-        size_button = QPushButton("🖥️ Size Options")
+        size_button = QPushButton("Size Options")
         size_button.setStyleSheet("""
             QPushButton {
                 background-color: #0078D7;
@@ -194,8 +245,7 @@ class RemoteMouseUI(QWidget):
         instruction = QLabel(
             "To change app/icon/text sizes:\n"
             "1. Click 'Size Options'\n"
-            "2. Change 'Scale and layout' → "
-            "'Change the size of text, apps, and other items'"
+            "2. Change 'Scale and layout'"
         )
         instruction.setAlignment(Qt.AlignCenter)
         instruction.setWordWrap(True)
@@ -219,18 +269,29 @@ class RemoteMouseUI(QWidget):
             resolution = (w, h)
 
     def open_display_settings(self):
-        subprocess.run(["start", "ms-settings:display"], shell=True)
+        subprocess.Popen(["cmd", "/c", "start", "ms-settings:display"],
+                        creationflags=subprocess.CREATE_NO_WINDOW)
 
 
-# === Main Launch ===
+def run_server():
+    """Run Flask server in a separate thread."""
+    try:
+        logging.info("Starting Flask server on 0.0.0.0:5050")
+        print("Starting Flask server on 0.0.0.0:5050", flush=True)
+        socketio.run(app, host='0.0.0.0', port=5050, use_reloader=False, log_output=False, allow_unsafe_werkzeug=True)
+    except Exception as e:
+        logging.error(f"Server error: {e}")
+        print(f"Server error: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+
+
 if __name__ == '__main__':
-    def run_flask():
-        socketio.run(app, host='0.0.0.0', port=5050)
+    # Start Flask server in background thread
+    server_thread = threading.Thread(target=run_server, daemon=True)
+    server_thread.start()
 
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
-
+    # Run Qt application on main thread
     qt_app = QApplication(sys.argv)
     window = RemoteMouseUI()
     window.show()
