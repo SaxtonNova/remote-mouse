@@ -132,26 +132,19 @@ jobs:
           # Copy executable
           cp dist/remote-touchpad AppDir/usr/bin/
 
-          # Create desktop file (no leading spaces)
-          cat > AppDir/usr/share/applications/remote-touchpad.desktop << 'EOF'
-[Desktop Entry]
-Name=Remote Touchpad
-Exec=remote-touchpad
-Icon=remote-touchpad
-Type=Application
-Categories=Utility;
-EOF
+          # Create desktop file
+          echo "[Desktop Entry]" > AppDir/usr/share/applications/remote-touchpad.desktop
+          echo "Name=Remote Touchpad" >> AppDir/usr/share/applications/remote-touchpad.desktop
+          echo "Exec=remote-touchpad" >> AppDir/usr/share/applications/remote-touchpad.desktop
+          echo "Icon=remote-touchpad" >> AppDir/usr/share/applications/remote-touchpad.desktop
+          echo "Type=Application" >> AppDir/usr/share/applications/remote-touchpad.desktop
+          echo "Categories=Utility;" >> AppDir/usr/share/applications/remote-touchpad.desktop
 
           # Copy desktop file to AppDir root
           cp AppDir/usr/share/applications/remote-touchpad.desktop AppDir/
 
           # Create AppRun
-          cat > AppDir/AppRun << 'EOF'
-#!/bin/bash
-SELF=$(readlink -f "$0")
-HERE=${SELF%/*}
-exec "${HERE}/usr/bin/remote-touchpad" "$@"
-EOF
+          printf '#!/bin/bash\nSELF=$(readlink -f "$0")\nHERE=${SELF%%/*}\nexec "${HERE}/usr/bin/remote-touchpad" "$@"\n' > AppDir/AppRun
           chmod +x AppDir/AppRun
 
           # Create simple icon (placeholder)
