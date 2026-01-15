@@ -5,7 +5,7 @@ a = Analysis(
     ['server.py'],
     pathex=[],
     binaries=[],
-    datas=[('webapp', 'webapp')],
+    datas=[('webapp', 'webapp'), ('remote-mouse.ico', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

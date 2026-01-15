@@ -43,8 +43,8 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QVBoxLayout,
     QSlider, QComboBox, QPushButton
 )
-from PyQt5.QtGui import QPixmap
-from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QPixmap, QIcon
+from PyQt5.QtCore import Qt, pyqtSignal, QObject
 
 # Disable pyautogui failsafe (prevents error when mouse hits screen corners)
 pyautogui.FAILSAFE = False
@@ -293,6 +293,12 @@ if __name__ == '__main__':
 
     # Run Qt application on main thread
     qt_app = QApplication(sys.argv)
+
+    # Set application icon
+    icon_path = os.path.join(get_base_path(), 'remote-mouse.ico')
+    if os.path.exists(icon_path):
+        qt_app.setWindowIcon(QIcon(icon_path))
+
     window = RemoteMouseUI()
     window.show()
     sys.exit(qt_app.exec_())
