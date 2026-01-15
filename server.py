@@ -1,44 +1,50 @@
 import sys
 import os
-
-# === Handle windowless mode for PyInstaller ===
-# Redirect stdout/stderr to a file for debugging, or devnull in production
-def setup_output_streams():
-    if sys.stdout is None or sys.stderr is None:
-        app_data = os.environ.get('LOCALAPPDATA', os.path.expanduser('~'))
-        log_dir = os.path.join(app_data, 'RemoteTouchpad')
-        os.makedirs(log_dir, exist_ok=True)
-        log_file = os.path.join(log_dir, 'debug.log')
-
-        f = open(log_file, 'w', encoding='utf-8')
-        if sys.stdout is None:
-            sys.stdout = f
-        if sys.stderr is None:
-            sys.stderr = f
-
-setup_output_streams()
-
+import platform
 import json
 import random
 import socket
-import qrcode
 import threading
 import subprocess
 import logging
-from flask import Flask, send_from_directory, request
 
-# Setup logging to file when running as exe
+# Must happen before Flask/Qt imports or they crash
+IS_WINDOWS = platform.system() == 'Windows'
+IS_MAC = platform.system() == 'Darwin'
+IS_LINUX = platform.system() == 'Linux'
+
+def _get_app_data_path_early():
+    if IS_WINDOWS:
+        base = os.environ.get('LOCALAPPDATA', os.path.expanduser('~'))
+    elif IS_MAC:
+        base = os.path.join(os.path.expanduser('~'), 'Library', 'Application Support')
+    else:
+        base = os.environ.get('XDG_DATA_HOME', os.path.join(os.path.expanduser('~'), '.local', 'share'))
+    app_folder = os.path.join(base, 'RemoteTouchpad')
+    os.makedirs(app_folder, exist_ok=True)
+    return app_folder
+
+if sys.stdout is None or sys.stderr is None:
+    _log_dir = _get_app_data_path_early()
+    _log_file = os.path.join(_log_dir, 'debug.log')
+    _f = open(_log_file, 'w', encoding='utf-8')
+    if sys.stdout is None:
+        sys.stdout = _f
+    if sys.stderr is None:
+        sys.stderr = _f
+
 if getattr(sys, 'frozen', False):
-    app_data = os.environ.get('LOCALAPPDATA', os.path.expanduser('~'))
-    log_dir = os.path.join(app_data, 'RemoteTouchpad')
+    _log_dir = _get_app_data_path_early()
     logging.basicConfig(
-        filename=os.path.join(log_dir, 'app.log'),
+        filename=os.path.join(_log_dir, 'app.log'),
         level=logging.DEBUG,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
+import qrcode
+from flask import Flask, send_from_directory, request
 from flask_socketio import SocketIO, emit
-from engineio.async_drivers import threading as async_threading  # Required for async_mode='threading'
+from engineio.async_drivers import threading as async_threading  # noqa: F401 - Required for async_mode='threading'
 import pyautogui
 import pyperclip
 from PyQt5.QtWidgets import (
@@ -52,10 +58,17 @@ from PyQt5.QtCore import Qt, pyqtSignal, QObject
 pyautogui.FAILSAFE = False
 
 
+# === Helper Functions ===
 def get_app_data_path():
-    """Get the appropriate AppData folder for storing application files."""
-    app_data = os.environ.get('LOCALAPPDATA', os.path.expanduser('~'))
-    app_folder = os.path.join(app_data, 'RemoteTouchpad')
+    """Get the appropriate app data folder for each OS."""
+    if IS_WINDOWS:
+        base = os.environ.get('LOCALAPPDATA', os.path.expanduser('~'))
+    elif IS_MAC:
+        base = os.path.join(os.path.expanduser('~'), 'Library', 'Application Support')
+    else:  # Linux
+        base = os.environ.get('XDG_DATA_HOME', os.path.join(os.path.expanduser('~'), '.local', 'share'))
+
+    app_folder = os.path.join(base, 'RemoteTouchpad')
     os.makedirs(app_folder, exist_ok=True)
     return app_folder
 
@@ -113,8 +126,8 @@ mouse_sensitivity = 0.8
 scroll_sensitivity = 1.0
 resolution = (1920, 1080)
 trusted_devices = load_trusted_devices()
-current_pin = None  # Will be set when "Add Device" is clicked
-authenticated_sessions = set()  # Socket IDs that have been authenticated
+current_pin = None
+authenticated_sessions = set()
 
 
 # === Flask App ===
@@ -140,6 +153,7 @@ def is_authenticated(sid):
     return client_ip in trusted_devices or sid in authenticated_sessions
 
 
+# === Flask Routes ===
 @app.route('/')
 def index():
     return send_from_directory(webapp_path, 'index.html')
@@ -150,6 +164,7 @@ def serve_static(path):
     return send_from_directory(webapp_path, path)
 
 
+# === Socket.IO Events ===
 @socketio.on('connect')
 def handle_connect():
     client_ip = get_client_ip()
@@ -166,11 +181,10 @@ def handle_check_pin(pin):
     sid = request.sid
 
     if current_pin and pin == current_pin:
-        # Add to trusted devices
         trusted_devices.add(client_ip)
         save_trusted_devices(trusted_devices)
         authenticated_sessions.add(sid)
-        current_pin = None  # Invalidate PIN after use
+        current_pin = None
         emit('auth_status', {'trusted': True, 'message': 'Device trusted!'})
         logging.info(f"Device authenticated: {client_ip}")
     else:
@@ -232,7 +246,10 @@ def handle_type(char):
         pyautogui.press('enter')
     else:
         pyperclip.copy(char)
-        pyautogui.hotkey("ctrl", "v")
+        if IS_MAC:
+            pyautogui.hotkey("command", "v")
+        else:
+            pyautogui.hotkey("ctrl", "v")
 
 
 # === Signal for cross-thread communication ===
@@ -247,7 +264,6 @@ class RemoteMouseUI(QWidget):
     def __init__(self):
         super().__init__()
 
-        # Connect signal for showing PIN from other threads
         signal_emitter.show_pin_signal.connect(self.display_pin_dialog)
 
         self.setWindowTitle("Remote Touchpad")
@@ -261,13 +277,11 @@ class RemoteMouseUI(QWidget):
         ip = get_local_ip()
         self.remote_url = f"http://{ip}:5050"
 
-        # Generate QR code to bytes buffer (no file I/O issues)
         qr = qrcode.QRCode(version=1, box_size=10, border=4)
         qr.add_data(self.remote_url)
         qr.make(fit=True)
         qr_img = qr.make_image(fill_color="black", back_color="white")
 
-        # Save to AppData
         qr_path = os.path.join(get_app_data_path(), "qr.png")
         qr_img.save(qr_path)
 
@@ -282,7 +296,6 @@ class RemoteMouseUI(QWidget):
         qr_display.setAlignment(Qt.AlignCenter)
         layout.addWidget(qr_display)
 
-        # URL label
         url_label = QLabel(self.remote_url)
         url_label.setAlignment(Qt.AlignCenter)
         url_label.setStyleSheet("font-size: 12px; color: #888;")
@@ -334,30 +347,30 @@ class RemoteMouseUI(QWidget):
         self.resolution_combo.currentIndexChanged.connect(self.update_resolution)
         layout.addWidget(self.resolution_combo)
 
-        # Size Options button
-        size_button = QPushButton("Size Options")
-        size_button.setStyleSheet("""
-            QPushButton {
-                background-color: #0078D7;
-                color: white;
-                padding: 10px;
-                font-size: 14px;
-                font-weight: bold;
-                border-radius: 8px;
-                border: 2px solid #005A9E;
-            }
-            QPushButton:hover {
-                background-color: #005A9E;
-            }
-        """)
-        size_button.clicked.connect(self.open_display_settings)
-        layout.addWidget(size_button)
+        # Display Settings button (Windows only)
+        if IS_WINDOWS:
+            size_button = QPushButton("Display Settings")
+            size_button.setStyleSheet("""
+                QPushButton {
+                    background-color: #0078D7;
+                    color: white;
+                    padding: 10px;
+                    font-size: 14px;
+                    font-weight: bold;
+                    border-radius: 8px;
+                    border: 2px solid #005A9E;
+                }
+                QPushButton:hover {
+                    background-color: #005A9E;
+                }
+            """)
+            size_button.clicked.connect(self.open_display_settings)
+            layout.addWidget(size_button)
 
         self.setLayout(layout)
 
-        # Show first-time setup dialog if no trusted devices
+        # First-time setup
         if len(trusted_devices) == 0:
-            # Use timer to show after window is displayed
             from PyQt5.QtCore import QTimer
             QTimer.singleShot(500, self.first_time_setup)
 
@@ -409,8 +422,18 @@ class RemoteMouseUI(QWidget):
             resolution = (w, h)
 
     def open_display_settings(self):
-        subprocess.Popen(["cmd", "/c", "start", "ms-settings:display"],
-                        creationflags=subprocess.CREATE_NO_WINDOW)
+        if IS_WINDOWS:
+            subprocess.Popen(["cmd", "/c", "start", "ms-settings:display"],
+                            creationflags=subprocess.CREATE_NO_WINDOW)
+        elif IS_MAC:
+            subprocess.Popen(["open", "/System/Library/PreferencePanes/Displays.prefPane"])
+        elif IS_LINUX:
+            for cmd in [["gnome-control-center", "display"], ["xfce4-display-settings"], ["kcmshell5", "kcm_kscreen"]]:
+                try:
+                    subprocess.Popen(cmd)
+                    break
+                except FileNotFoundError:
+                    continue
 
 
 def run_server():
@@ -419,10 +442,9 @@ def run_server():
         logging.info(f"Starting Flask server on 0.0.0.0:5050")
         logging.info(f"webapp_path: {webapp_path}")
         logging.info(f"webapp exists: {os.path.exists(webapp_path)}")
-        logging.info(f"index.html exists: {os.path.exists(os.path.join(webapp_path, 'index.html'))}")
         print(f"Starting Flask server on 0.0.0.0:5050", flush=True)
+        print(f"Platform: {platform.system()}", flush=True)
         print(f"webapp_path: {webapp_path}", flush=True)
-        print(f"webapp exists: {os.path.exists(webapp_path)}", flush=True)
         socketio.run(app, host='0.0.0.0', port=5050, use_reloader=False, log_output=False, allow_unsafe_werkzeug=True)
     except Exception as e:
         logging.error(f"Server error: {e}")
@@ -431,15 +453,13 @@ def run_server():
         traceback.print_exc()
 
 
+# === Main Entry Point ===
 if __name__ == '__main__':
-    # Start Flask server in background thread
     server_thread = threading.Thread(target=run_server, daemon=True)
     server_thread.start()
 
-    # Run Qt application on main thread
     qt_app = QApplication(sys.argv)
 
-    # Set application icon
     icon_path = os.path.join(get_base_path(), 'remote-mouse.ico')
     if os.path.exists(icon_path):
         qt_app.setWindowIcon(QIcon(icon_path))
