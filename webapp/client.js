@@ -1,5 +1,14 @@
 const socket = io();
 
+// === Authentication State ===
+let isAuthenticated = false;
+const pinScreen = document.getElementById('pinScreen');
+const pinInput = document.getElementById('pinInput');
+const pinSubmit = document.getElementById('pinSubmit');
+const pinError = document.getElementById('pinError');
+const connectedStatus = document.getElementById('connectedStatus');
+
+// === Touchpad State ===
 let scrollCooldownUntil = 0;
 let lastTouchX = null;
 let lastTouchY = null;
@@ -26,11 +35,60 @@ const SCALE_Y = (MONITOR_HEIGHT / PHONE_HEIGHT) * 1.2;
 const keyboardInput = document.getElementById('keyboardInput');
 const display = document.getElementById('display');
 
+// === Socket Events ===
 socket.on('connect', () => {
   console.log('[WEB] Connected to server');
 });
 
+socket.on('auth_status', (data) => {
+  console.log('[WEB] Auth status:', data);
+  if (data.trusted) {
+    isAuthenticated = true;
+    pinScreen.classList.add('hidden');
+    showConnectedStatus();
+    if (data.message) {
+      pinError.style.color = '#28a745';
+      pinError.textContent = data.message;
+    }
+  } else {
+    isAuthenticated = false;
+    pinScreen.classList.remove('hidden');
+    if (data.message) {
+      pinError.style.color = '#ff4444';
+      pinError.textContent = data.message;
+    }
+  }
+});
+
+function showConnectedStatus() {
+  connectedStatus.classList.add('show');
+  setTimeout(() => {
+    connectedStatus.classList.remove('show');
+  }, 2000);
+}
+
+// === PIN Entry ===
+pinSubmit.addEventListener('click', submitPin);
+pinInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    submitPin();
+  }
+});
+
+function submitPin() {
+  const pin = pinInput.value.trim();
+  if (pin.length === 4) {
+    pinError.textContent = '';
+    socket.emit('check_pin', pin);
+  } else {
+    pinError.textContent = 'Please enter a 4-digit PIN';
+  }
+}
+
+// === Touch Handlers ===
 function handleTouchStart(e) {
+  if (!isAuthenticated) return;
+
   activeTouchCount = e.touches.length;
 
   if (e.touches.length === 2) {
@@ -63,6 +121,8 @@ function handleTouchStart(e) {
 }
 
 function handleTouchMove(e) {
+  if (!isAuthenticated) return;
+
   if (e.touches.length === 2) {
     const t1 = e.touches[0];
     const t2 = e.touches[1];
@@ -113,6 +173,8 @@ function handleTouchMove(e) {
 }
 
 function handleTouchEnd(e) {
+  if (!isAuthenticated) return;
+
   const now = Date.now();
   activeTouchCount = e.touches.length;
   const isTwoFingerEnd = e.changedTouches.length === 2;
@@ -145,59 +207,65 @@ function handleTouchEnd(e) {
 }
 
 
+// === Keyboard Input ===
 let backspaceHoldInterval = null;
 let currentText = '';
 let ignoreInput = false;
 
 keyboardInput.addEventListener('keydown', (e) => {
+  if (!isAuthenticated) return;
+
   if (e.key === 'Backspace') {
     ignoreInput = true;
     if (!backspaceHoldInterval) {
       socket.emit('type', 'BACKSPACE');
-      display.textContent = currentText;
+      if (display) display.textContent = currentText;
       backspaceHoldInterval = setInterval(() => {
         socket.emit('type', 'BACKSPACE');
-        display.textContent = currentText;
+        if (display) display.textContent = currentText;
       }, 100);
     }
     e.preventDefault();
-  }else if (e.key === 'Enter') {
+  } else if (e.key === 'Enter') {
     e.preventDefault();
     ignoreInput = true;
     keyboardInput.value = '';
-    socket.emit('type', 'ENTER'); // send ENTER key event to desktop
+    socket.emit('type', 'ENTER');
   }
 });
+
 keyboardInput.addEventListener('keyup', (e) => {
   if (e.key === 'Backspace') {
     ignoreInput = false;
     clearInterval(backspaceHoldInterval);
     backspaceHoldInterval = null;
     e.preventDefault();
-  }else if (e.key === 'Enter') {
+  } else if (e.key === 'Enter') {
     e.preventDefault();
     ignoreInput = false;
   }
 });
 
 keyboardInput.addEventListener('input', (e) => {
+  if (!isAuthenticated) return;
+
   const val = e.target.value;
-  
+
   if (ignoreInput) {
     return;
   }
-  
 
   if (val.length > 0) {
     const char = val[val.length - 1];
-    currentText += char;              // append typed char
+    currentText += char;
     socket.emit('type', char);
-    display.textContent = currentText; // update display
-    keyboardInput.value = '';           // clear input for next char
+    if (display) display.textContent = currentText;
+    keyboardInput.value = '';
   }
 });
 
 
+// === Initialize ===
 window.addEventListener('load', () => {
   document.body.addEventListener('touchstart', handleTouchStart, { passive: false });
   document.body.addEventListener('touchmove', handleTouchMove, { passive: false });

@@ -10,10 +10,11 @@
       background: black;
       height: 100vh;
       width: 100vw;
-      touch-action: none; /* disable scrolling */
+      touch-action: none;
       overflow: hidden;
       color: white;
       position: relative;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
 
     #keyboardInput {
@@ -32,10 +33,122 @@
       outline: none;
       box-sizing: border-box;
     }
+
+    /* PIN Entry Screen */
+    #pinScreen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 20000;
+    }
+
+    #pinScreen.hidden {
+      display: none;
+    }
+
+    #pinScreen h1 {
+      font-size: 24px;
+      margin-bottom: 10px;
+      color: #fff;
+    }
+
+    #pinScreen p {
+      font-size: 14px;
+      color: #888;
+      margin-bottom: 30px;
+      text-align: center;
+      padding: 0 20px;
+    }
+
+    #pinInput {
+      font-size: 32px;
+      letter-spacing: 10px;
+      text-align: center;
+      width: 200px;
+      padding: 15px;
+      border: 2px solid #0af;
+      border-radius: 10px;
+      background: #222;
+      color: white;
+      outline: none;
+    }
+
+    #pinInput::placeholder {
+      letter-spacing: 2px;
+      font-size: 18px;
+    }
+
+    #pinSubmit {
+      margin-top: 20px;
+      padding: 15px 50px;
+      font-size: 18px;
+      font-weight: bold;
+      background: #0af;
+      color: #000;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+    }
+
+    #pinSubmit:active {
+      background: #08c;
+    }
+
+    #pinError {
+      margin-top: 15px;
+      color: #ff4444;
+      font-size: 14px;
+      min-height: 20px;
+    }
+
+    #connectedStatus {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #28a745;
+      color: white;
+      padding: 8px 20px;
+      border-radius: 20px;
+      font-size: 14px;
+      z-index: 15000;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    #connectedStatus.show {
+      opacity: 1;
+    }
   </style>
 </head>
 <body>
 
+  <!-- PIN Entry Screen -->
+  <div id="pinScreen">
+    <h1>Enter PIN</h1>
+    <p>Enter the PIN shown on your computer to connect this device</p>
+    <input
+      id="pinInput"
+      type="tel"
+      maxlength="4"
+      placeholder="****"
+      autocomplete="off"
+    />
+    <button id="pinSubmit">Connect</button>
+    <div id="pinError"></div>
+  </div>
+
+  <!-- Connected Status -->
+  <div id="connectedStatus">Connected!</div>
+
+  <!-- Main touchpad area -->
   <input
     id="keyboardInput"
     type="text"
