@@ -34,13 +34,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-installer
-          path: installer_output/RemoteTouchpad_Setup.exe
+          path: installer_output/RemoteTouchpad_Windows_Installer.exe
 
       - name: Upload to Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v1
         with:
-          files: installer_output/RemoteTouchpad_Setup.exe
+          files: installer_output/RemoteTouchpad_Windows_Installer.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -119,9 +119,10 @@ jobs:
 
       - name: Create AppImage
         run: |
-          # Download appimagetool
+          # Download appimagetool and extract it (no FUSE needed)
           wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x appimagetool-x86_64.AppImage
+          ./appimagetool-x86_64.AppImage --appimage-extract
 
           # Create AppDir structure
           mkdir -p AppDir/usr/bin
@@ -131,33 +132,33 @@ jobs:
           # Copy executable
           cp dist/remote-touchpad AppDir/usr/bin/
 
-          # Create desktop file
-          cat > AppDir/usr/share/applications/remote-touchpad.desktop << EOF
-          [Desktop Entry]
-          Name=Remote Touchpad
-          Exec=remote-touchpad
-          Icon=remote-touchpad
-          Type=Application
-          Categories=Utility;
-          EOF
+          # Create desktop file (no leading spaces)
+          cat > AppDir/usr/share/applications/remote-touchpad.desktop << 'EOF'
+[Desktop Entry]
+Name=Remote Touchpad
+Exec=remote-touchpad
+Icon=remote-touchpad
+Type=Application
+Categories=Utility;
+EOF
 
           # Copy desktop file to AppDir root
           cp AppDir/usr/share/applications/remote-touchpad.desktop AppDir/
 
           # Create AppRun
           cat > AppDir/AppRun << 'EOF'
-          #!/bin/bash
-          SELF=$(readlink -f "$0")
-          HERE=${SELF%/*}
-          exec "${HERE}/usr/bin/remote-touchpad" "$@"
-          EOF
+#!/bin/bash
+SELF=$(readlink -f "$0")
+HERE=${SELF%/*}
+exec "${HERE}/usr/bin/remote-touchpad" "$@"
+EOF
           chmod +x AppDir/AppRun
 
           # Create simple icon (placeholder)
           convert -size 256x256 xc:white AppDir/usr/share/icons/hicolor/256x256/apps/remote-touchpad.png 2>/dev/null || touch AppDir/remote-touchpad.png
 
-          # Build AppImage
-          ARCH=x86_64 ./appimagetool-x86_64.AppImage AppDir RemoteTouchpad_Linux.AppImage
+          # Build AppImage using extracted appimagetool
+          ARCH=x86_64 ./squashfs-root/AppRun AppDir RemoteTouchpad_Linux.AppImage
 
       - name: Upload Linux AppImage
         uses: actions/upload-artifact@v4
